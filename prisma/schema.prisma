@@ -1,0 +1,158 @@
+// Yumeroa Global Network — Prisma Schema
+// Connected to Supabase PostgreSQL
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─── User Model ─────────────────────────────────────────
+model User {
+  id        String   @id @default(uuid()) @db.Uuid
+  email     String   @unique
+  name      String?
+  role      Role     @default(USER)
+  avatarUrl String?  @map("avatar_url")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  articles       Article[]
+  partnerProfile PartnerProfile?
+
+  @@map("users")
+}
+
+enum Role {
+  USER
+  PARTNER
+  EDITOR
+  ADMIN
+}
+
+// ─── Partner Profile ────────────────────────────────────
+model PartnerProfile {
+  id              String      @id @default(uuid()) @db.Uuid
+  userId          String      @unique @map("user_id") @db.Uuid
+  user            User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  stripeAccountId String?     @map("stripe_account_id")
+  tier            PartnerTier @default(SCOUT)
+  totalEarned     Float       @default(0.0) @map("total_earned")
+  createdAt       DateTime    @default(now()) @map("created_at")
+  updatedAt       DateTime    @updatedAt @map("updated_at")
+
+  trackingLinks TrackingLink[]
+  conversions   Conversion[]
+  ledgerEntries Ledger[]
+
+  @@map("partner_profiles")
+}
+
+enum PartnerTier {
+  SCOUT // 60/40
+  PRO // 70/30
+  ELITE // 80/20
+}
+
+// ─── Article Model (WP Sync Target) ─────────────────────
+model Article {
+  id         String        @id @default(uuid()) @db.Uuid
+  wpId       Int?          @unique @map("wp_id")
+  title      String
+  slug       String        @unique
+  excerpt    String?
+  content    String?       @db.Text
+  coverImage String?       @map("cover_image")
+  status     ArticleStatus @default(DRAFT)
+  seoMeta    Json?         @map("seo_meta")
+  authorId   String?       @map("author_id") @db.Uuid
+  createdAt  DateTime      @default(now()) @map("created_at")
+  updatedAt  DateTime      @updatedAt @map("updated_at")
+
+  author        User?          @relation(fields: [authorId], references: [id], onDelete: SetNull)
+  trackingLinks TrackingLink[]
+
+  @@index([status])
+  @@index([authorId])
+  @@map("articles")
+}
+
+enum ArticleStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+// ─── Affiliate Tracking ─────────────────────────────────
+model TrackingLink {
+  id        String   @id @default(uuid()) @db.Uuid
+  partnerId String   @map("partner_id") @db.Uuid
+  articleId String   @map("article_id") @db.Uuid
+  shortCode String   @unique @map("short_code")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  partner PartnerProfile @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+  article Article        @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  clicks  Click[]
+
+  @@unique([partnerId, articleId])
+  @@map("tracking_links")
+}
+
+model Click {
+  id        String   @id @default(uuid()) @db.Uuid
+  linkId    String   @map("link_id") @db.Uuid
+  ipHash    String?  @map("ip_hash")
+  userAgent String?  @map("user_agent")
+  timestamp DateTime @default(now())
+
+  link TrackingLink @relation(fields: [linkId], references: [id], onDelete: Cascade)
+
+  @@index([linkId])
+  @@index([timestamp])
+  @@map("clicks")
+}
+
+model Conversion {
+  id           String           @id @default(uuid()) @db.Uuid
+  partnerId    String           @map("partner_id") @db.Uuid
+  networkId    String?          @map("network_id")
+  payoutAmount Float            @map("payout_amount")
+  status       ConversionStatus @default(PENDING)
+  createdAt    DateTime         @default(now()) @map("created_at")
+  clearedAt    DateTime?        @map("cleared_at")
+
+  partner PartnerProfile @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+
+  @@index([partnerId])
+  @@map("conversions")
+}
+
+enum ConversionStatus {
+  PENDING
+  CLEARED
+  REJECTED
+}
+
+// ─── Financial Ledger ───────────────────────────────────
+model Ledger {
+  id        String     @id @default(uuid()) @db.Uuid
+  partnerId String     @map("partner_id") @db.Uuid
+  amount    Float
+  type      LedgerType
+  createdAt DateTime   @default(now()) @map("created_at")
+
+  partner PartnerProfile @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+
+  @@index([partnerId])
+  @@map("ledger")
+}
+
+enum LedgerType {
+  CREDIT
+  DEBIT
+  PAYOUT
+}
